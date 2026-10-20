@@ -26,11 +26,17 @@ pub fn window_icon() -> egui::IconData {
     }
 }
 
+/// An explicit empty icon tells eframe to leave the macOS bundle's icon alone (#7253).
+/// Leaving `ViewportBuilder::icon` as `None` instead selects eframe's default glyph.
+pub fn viewport_icon(exe: Option<&std::path::Path>) -> egui::IconData {
+    if sets_runtime_icon(exe) { window_icon() } else { egui::IconData::default() }
+}
+
 /// Whether the window gets [`window_icon`] at runtime: everywhere except inside a macOS app
 /// bundle. There the Dock shows the bundle's `PhotoCraft.icns` (`CFBundleIconFile`), which macOS
 /// renders in its own style (Liquid Glass and its tinted and dark variants); a runtime PNG
 /// replaced it with a flat picture (#5849). `exe` is the running executable.
-pub fn sets_runtime_icon(exe: Option<&std::path::Path>) -> bool {
+fn sets_runtime_icon(exe: Option<&std::path::Path>) -> bool {
     !(cfg!(target_os = "macos") && exe.is_some_and(in_app_bundle))
 }
 
@@ -78,6 +84,26 @@ mod tests {
         assert!(sets_runtime_icon(None));
         assert!(sets_runtime_icon(Some(Path::new("/usr/bin/photocraft"))));
         assert_eq!(sets_runtime_icon(Some(Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft"))), !cfg!(target_os = "macos"));
+    }
+
+    /// eframe substitutes its glyph only for `None`; `Some(empty)` opts out of its setter.
+    #[test]
+    fn bundled_viewport_explicitly_suppresses_eframe_fallback() {
+        let exe = std::path::Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft");
+        let viewport = egui::ViewportBuilder::default().with_icon(viewport_icon(Some(exe)));
+        let icon = viewport.icon.expect("never leave the icon unset: eframe would install its glyph");
+        if cfg!(target_os = "macos") {
+            assert_eq!(*icon, egui::IconData::default(), "preserve the bundle's native icon");
+        } else {
+            assert!(!icon.rgba.is_empty(), "other platforms still get PhotoCraft's icon");
+        }
+    }
+
+    #[test]
+    fn unbundled_viewport_keeps_photocraft_icon() {
+        for exe in [None, Some(std::path::Path::new("/tmp/photocraft"))] {
+            assert_eq!(viewport_icon(exe), window_icon());
+        }
     }
 
     #[test]
