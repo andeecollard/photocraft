@@ -35,9 +35,10 @@ pub fn viewport_icon(exe: Option<&std::path::Path>) -> egui::IconData {
 /// Whether the window gets [`window_icon`] at runtime: everywhere except inside a macOS app
 /// bundle. There the Dock shows the bundle's `PhotoCraft.icns` (`CFBundleIconFile`), which macOS
 /// renders in its own style (Liquid Glass and its tinted and dark variants); a runtime PNG
-/// replaced it with a flat picture (#5849). `exe` is the running executable.
+/// replaced it with a flat picture (#5849). If the executable lookup fails on macOS, preserve
+/// the system icon too rather than risk replacing a bundle icon. `exe` is the running executable.
 fn sets_runtime_icon(exe: Option<&std::path::Path>) -> bool {
-    !(cfg!(target_os = "macos") && exe.is_some_and(in_app_bundle))
+    !(cfg!(target_os = "macos") && exe.is_none_or(in_app_bundle))
 }
 
 /// Whether `exe` is an app bundle's executable: `…/Name.app/Contents/MacOS/binary`.
@@ -73,7 +74,7 @@ mod tests {
     /// #5849: a macOS app bundle keeps its .icns in the Dock; unbundled runs (cargo run, the
     /// Linux and Windows builds) still set the runtime icon.
     #[test]
-    fn only_a_macos_app_bundle_skips_the_runtime_icon() {
+    fn macos_bundles_and_unknown_executables_skip_the_runtime_icon() {
         use std::path::Path;
         assert!(in_app_bundle(Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft")));
         assert!(in_app_bundle(Path::new("/Users/a/Downloads/PhotoCraft Beta.APP/Contents/MacOS/photocraft")));
@@ -81,7 +82,7 @@ mod tests {
         assert!(!in_app_bundle(Path::new("/opt/Contents/MacOS/photocraft")), "not inside a .app");
         assert!(!in_app_bundle(Path::new("/.app/Contents/MacOS/photocraft")), "a bare `.app` is no bundle name");
         assert!(!in_app_bundle(Path::new("photocraft")));
-        assert!(sets_runtime_icon(None));
+        assert_eq!(sets_runtime_icon(None), !cfg!(target_os = "macos"));
         assert!(sets_runtime_icon(Some(Path::new("/usr/bin/photocraft"))));
         assert_eq!(sets_runtime_icon(Some(Path::new("/Applications/PhotoCraft.app/Contents/MacOS/photocraft"))), !cfg!(target_os = "macos"));
     }
@@ -101,8 +102,17 @@ mod tests {
 
     #[test]
     fn unbundled_viewport_keeps_photocraft_icon() {
-        for exe in [None, Some(std::path::Path::new("/tmp/photocraft"))] {
-            assert_eq!(viewport_icon(exe), window_icon());
+        assert_eq!(viewport_icon(Some(std::path::Path::new("/tmp/photocraft"))), window_icon());
+    }
+
+    #[test]
+    fn failed_executable_lookup_preserves_system_icon_on_macos() {
+        let viewport = egui::ViewportBuilder::default().with_icon(viewport_icon(None));
+        let icon = viewport.icon.expect("lookup failure must not select eframe's fallback");
+        if cfg!(target_os = "macos") {
+            assert_eq!(*icon, egui::IconData::default());
+        } else {
+            assert_eq!(*icon, window_icon());
         }
     }
 

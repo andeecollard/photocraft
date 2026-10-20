@@ -39,7 +39,8 @@ craftrules at `assets/app-icons/photocraft/source.png`. License: see `LICENSE.tx
 The app also sets the window icon and Wayland app ID at runtime (`apps/photocraft/src/app_icon.rs`,
 `main.rs`). Packaged macOS builds pass an explicit empty `IconData` to eframe so the Dock
 keeps the bundle's `.icns` and native appearance. Leaving the viewport icon unset selects
-eframe's fallback glyph instead (#7253). Unbundled macOS runs still use the PNG.
+eframe's fallback glyph instead (#7253). Unbundled macOS runs still use the PNG. If the
+executable path cannot be determined on macOS, the system icon is preserved as well.
 On Windows the taskbar shows the icon of the Start Menu shortcut that launches the
 exe, so the MSI's `<Icon Id>` keeps the `.exe` extension (ICE50); `app_icon.rs` documents the
 details and tests the `.ico` sizes and the WiX icon references.
