@@ -462,6 +462,31 @@ impl Drop for PreviewJob {
     }
 }
 
+/// The zoom bar's − / + steps (0 = Fit in View).
+const ZOOM_STEPS: [f32; 7] = [0.0, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0];
+
+/// The next [`ZOOM_STEPS`] entry up (`dir` > 0) or down from `zoom`.
+fn step_zoom(zoom: f32, dir: i32) -> f32 {
+    if dir > 0 {
+        ZOOM_STEPS.iter().copied().find(|&s| s > zoom + 1e-3).unwrap_or(4.0)
+    } else {
+        ZOOM_STEPS.iter().rev().copied().find(|&s| s > 0.0 && s < zoom.max(0.0) - 1e-3).unwrap_or(0.0)
+    }
+}
+
+/// ⌘+ / ⌘− / ⌘0 / ⌘1 (or their overrides) zoom the preview like its − / + buttons, Fit in View
+/// and 100 %, not the canvas behind the dialog.
+pub fn keys(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let nav = if app.distort.gallery.is_some() { crate::shortcuts::nav_shortcut(app, ctx) } else { None };
+    let (Some(d), Some(id)) = (app.distort.gallery.as_mut(), nav) else { return };
+    d.zoom = match id {
+        "view.zoomIn" => step_zoom(d.zoom, 1),
+        "view.zoomOut" => step_zoom(d.zoom, -1),
+        "view.fitOnScreen" => 0.0,
+        _ => 1.0,
+    };
+}
+
 /// The preview's zoom (screen px per document px), the visible document rect and the factor the
 /// texture is reduced by. Fit in View also recentres the view.
 fn view(d: &mut GalleryDialog, area: ERect) -> (f32, Rect, u32) {
@@ -643,12 +668,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // ---- Zoom bar ----
         painter.rect_filled(zoom_bar, 0.0, t.dock);
         let mut zb = ui.new_child(egui::UiBuilder::new().max_rect(zoom_bar.shrink2(vec2(10.0, 3.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        let steps = [0.0f32, 0.125, 0.25, 0.5, 1.0, 2.0, 4.0];
         if crate::icons::button(&mut zb, "minus", 22.0, false, tl!("Zoom out")).clicked() {
-            d.zoom = steps.iter().rev().copied().find(|&s| s > 0.0 && s < d.zoom.max(0.0) - 1e-3).unwrap_or(0.0);
+            d.zoom = step_zoom(d.zoom, -1);
         }
         if crate::icons::button(&mut zb, "plus", 22.0, false, tl!("Zoom in")).clicked() {
-            d.zoom = steps.iter().copied().find(|&s| s > d.zoom + 1e-3).unwrap_or(4.0);
+            d.zoom = step_zoom(d.zoom, 1);
         }
         let mut z = d.zoom;
         let opts: Vec<(f32, &str)> =
@@ -877,6 +901,32 @@ mod tests {
             .unwrap();
         app.sync_views();
         app
+    }
+
+    /// ⌘+ / ⌘− step the preview like the zoom bar's buttons, ⌘0 fits it and ⌘1 is 100 %, through
+    /// the canvas's own shortcuts; the canvas behind keeps its zoom.
+    #[test]
+    fn zoom_shortcuts_zoom_the_preview_not_the_canvas() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        open(&mut app).unwrap();
+        let canvas_zoom = app.ui.views.first().map(|v| v.zoom);
+        let mut press = |key: egui::Key| {
+            let ev = egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+            let raw = egui::RawInput { events: vec![ev], ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| crate::shortcuts::handle(&mut app, ui.ctx()));
+            out.textures_delta.clear();
+            app.distort.gallery.as_ref().unwrap().zoom
+        };
+        assert_eq!(press(egui::Key::Num1), 1.0);
+        assert_eq!(press(egui::Key::Equals), 2.0, "next step up");
+        assert_eq!(press(egui::Key::Plus), 4.0, "⌘+ typed as Plus too");
+        assert_eq!(press(egui::Key::Plus), 4.0, "400 % is the top step");
+        assert_eq!(press(egui::Key::Minus), 2.0);
+        assert_eq!(press(egui::Key::Num0), 0.0, "Fit in View");
+        assert_eq!(press(egui::Key::Minus), 0.0, "nothing below Fit");
+        assert!(app.distort.gallery.is_some(), "the dialog stays open");
+        assert_eq!(app.ui.views.first().map(|v| v.zoom), canvas_zoom, "the canvas behind keeps its zoom");
     }
 
     #[test]
