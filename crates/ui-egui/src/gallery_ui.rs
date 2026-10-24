@@ -471,10 +471,11 @@ const ZOOM_MAX: f32 = 32.0;
 
 /// Zoom In (`dir` > 0) or Zoom Out along the canvas's ladder, as Liquify's preview does (#7210),
 /// from the zoom on screen: Fit in View steps from the zoom it fits at, so zooming in from a
-/// large image's Fit never shrinks it.
+/// large image's Fit never shrinks it, and zooming out from a Fit below [`ZOOM_MIN`] stays at Fit.
 fn step_zoom(d: &GalleryDialog, dir: i32) -> f32 {
     let on_screen = if d.zoom > 0.0 { d.zoom } else { d.fit };
-    crate::zoom_levels::step_in_range(on_screen, dir, ZOOM_MIN, ZOOM_MAX)
+    let next = crate::zoom_levels::step_in_range(on_screen, dir, ZOOM_MIN, ZOOM_MAX);
+    if d.zoom <= 0.0 && dir < 0 && next >= d.fit { 0.0 } else { next }
 }
 
 /// ⌘+ / ⌘− / ⌘0 / ⌘1 (or their overrides) zoom the preview like its − / + buttons, Fit in View
@@ -957,6 +958,21 @@ mod tests {
         assert_eq!(run(Some(egui::Key::Minus)).0, 2.0);
         assert!(app.distort.gallery.is_some(), "the dialog stays open");
         assert_eq!(app.ui.views.first().map(|v| v.zoom), canvas_zoom, "the canvas behind keeps its zoom");
+    }
+
+    /// A huge image can fit below the 1 % minimum: Zoom Out keeps Fit in View rather than
+    /// enlarging it to 1 %, and Zoom In still steps up from there.
+    #[test]
+    fn zoom_out_from_a_fit_below_the_minimum_stays_at_fit() {
+        let mut app = app();
+        open(&mut app).unwrap();
+        let d = app.distort.gallery.as_mut().unwrap();
+        d.zoom = 0.0;
+        d.fit = 0.005;
+        assert_eq!(step_zoom(d, -1), 0.0, "no smaller zoom than Fit: stays at Fit in View");
+        assert!(step_zoom(d, 1) > d.fit);
+        d.fit = 0.05;
+        assert!(step_zoom(d, -1) > 0.0 && step_zoom(d, -1) < 0.05, "a Fit above the minimum still steps down");
     }
 
     #[test]
